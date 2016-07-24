@@ -11,25 +11,7 @@ import os
 import re
 import sys
 
-try:
-    import tarjan
-except ImportError:
-    print("This program requires the tarjan package.")
-    print("Please install it and try again.")
-    sys.exit(1)
-
-# We need to know for each package (a) which strongly connected
-# component it’s in (identified by index); (b) whether it’s a base
-# package; (c) what it requires; (d) whether it’s a root (i.e., not
-# yet known to be a nonroot).  (d) is only relevant for the first
-# package in each component, which is used as representative of that
-# component.
-class PackageInfo:
-    def __init__(self):
-        self.requires = []
-        self.scc_ind = -1
-        self.is_root = True
-        self.is_base = False
+from roots import find_roots
 
 def get_setup_ini(args):
     if args.inifile:
@@ -60,33 +42,30 @@ def get_setup_ini(args):
         arch = 'x86'
     return os.path.join(cache_dir, mirror_dir, arch, 'setup.ini')
 
-# Return dictionary of all packages listed in setup.ini, indexed by name.
+# Return dependency graph of all packages listed in INIFILE, plus a
+# fictitious ’base’ package that requires all the packages in the Base
+# category.
 def parse_setup_ini(inifile):
-    pkgs = defaultdict(PackageInfo)
+    g = defaultdict(list)
+
     with open(inifile) as f:
         for line in f:
             match = re.match(r'^@\s+(\S+)', line)
             if match:
                 # New package
                 name = match.group(1)
-                pkgs[name] = PackageInfo()
                 continue
 
             if(re.match(r'^category:.*\bBase\b', line)):
-                pkgs[name].is_base = True
+                g['base'].append(name)
                 continue
 
             match = re.match(r'^requires:\s*(.*)$', line)
             if match:
-                pkgs[name].requires = match.group(1).split()
-    return pkgs
+                g[name] = match.group(1).split()
+    return g
 
-# Given a dictionary PKGS as above and a list INST of installed
-# packages, return the strongly connected components of the dependency
-# graph of installed packages.  This is a list of lists.
-def components(pkgs, inst):
-     return tarjan.tarjan({p: pkgs[p].requires for p in inst})
-
+# Return a list of installed packages.
 def get_installed_pkgs():
     with open("/var/log/setup.log.full") as f:
         c = f.read()
@@ -100,36 +79,22 @@ def get_installed_pkgs():
 def main():
     parser = argparse.ArgumentParser(description='Find roots of Cygwin installation')
     parser.add_argument('--inifile', '-i', action='store', help='path to setup.ini', required=False, metavar='FILE')
-    (args) = parser.parse_args()
+    args = parser.parse_args()
+
     inifile = get_setup_ini(args)
     if not os.path.exists(inifile):
         print("%s doesn't exist" % inifile)
         sys.exit(1)
 
-    all_pkgs = parse_setup_ini(inifile)
+    all_pkgs_graph = parse_setup_ini(inifile)
 
     inst = get_installed_pkgs()
+    inst.append('base')
+    
+    roots = sorted(find_roots({p: all_pkgs_graph[p] for p in inst}))
+    roots.remove('base')
 
-    sccs = components(all_pkgs, inst)
-
-    # For each installed package, record the index of its scc.
-    for i, c in enumerate(sccs):
-        for p in c:
-            all_pkgs[p].scc_ind = i
-
-    # For each component C, mark as nonroot any earlier component
-    # required by something in C.  And mark C as nonroot if it
-    # contains a base package.
-    for i, c in enumerate(sccs):
-        for p in c:
-            if all_pkgs[p].is_base:
-                all_pkgs[c[0]].is_root = False
-            for q in all_pkgs[p].requires:
-                j = all_pkgs[q].scc_ind
-                if j < i:
-                    all_pkgs[sccs[j][0]].is_root = False
-
-    roots = sorted([c[0] for c in sccs if all_pkgs[c[0]].is_root])
     print(','.join(roots))
 
-main()
+if __name__ == '__main__':
+    main()
