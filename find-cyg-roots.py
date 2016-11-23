@@ -78,7 +78,7 @@ def get_installed_pkgs():
 
 def main():
     parser = argparse.ArgumentParser(description='Find roots of Cygwin installation')
-    parser.add_argument('--inifile', '-i', action='store', help='path to setup.ini', required=False, metavar='FILE')
+    parser.add_argument('--inifile', '-p', action='store', help='path to setup.ini', required=False, metavar='FILE')
     args = parser.parse_args()
 
     inifile = get_setup_ini(args)
